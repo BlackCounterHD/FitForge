@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Data
+backend/data.json
+
+# Docs (personal notes)
+docs/
+PRESENTATION.md
+*.pdf
+
+# OS files
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
