@@ -1,108 +1,91 @@
-import { useState, useEffect } from 'react'
+import { useState, useRef } from 'react'
+import { doc, updateDoc } from 'firebase/firestore'
+import { db } from '../firebase'
+import { useAuth } from '../contexts/AuthContext'
+import NotificationSettings from './NotificationSettings'
 
-function Profile({ user, onUpdate }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    avatar: '',
-    theme: 'light'
-  })
+export default function Profile() {
+  const { currentUser, userProfile, setUserProfile, isGuest } = useAuth()
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(userProfile?.name || '')
+  const [email, setEmail] = useState(userProfile?.email || '')
+  const [uploading, setUploading] = useState(false)
   const [saved, setSaved] = useState(false)
+  const fileRef = useRef(null)
 
-  useEffect(() => {
-    if (user) {
-      setFormData({
-        name: user.name || '',
-        email: user.email || '',
-        avatar: user.avatar || '',
-        theme: user.theme || 'light'
-      })
-    }
-  }, [user])
-
-  const handleChange = (e) => {
-    const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
-    setSaved(false)
-  }
-
-  const handleSubmit = (e) => {
+  const save = async (e) => {
     e.preventDefault()
-    onUpdate(formData)
+    if (isGuest) {
+      setUserProfile(p => ({ ...p, name, email }))
+    } else {
+      try { await updateDoc(doc(db, 'users', currentUser.uid), { name, email }) }
+      catch (e) { console.error(e); return }
+      setUserProfile(p => ({ ...p, name, email }))
+    }
+    setEditing(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
 
-  const getInitials = (name) => {
-    return name
-      .split(' ')
-      .map(n => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2)
+  const uploadAvatar = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    if (file.size > 500000) { alert('Image too large (max 500KB)'); return }
+    setUploading(true)
+    const reader = new FileReader()
+    reader.onloadend = async () => {
+      const img = reader.result
+      if (isGuest) { setUserProfile(p => ({ ...p, avatar: img })); setUploading(false); return }
+      try { await updateDoc(doc(db, 'users', currentUser.uid), { avatar: img }) }
+      catch (e) { console.error(e) }
+      setUserProfile(p => ({ ...p, avatar: img }))
+      setUploading(false)
+    }
+    reader.readAsDataURL(file)
   }
+
+  const initials = (userProfile?.name || 'U').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 
   return (
     <div className="card">
       <h2>User Profile</h2>
       <div className="profile-section">
         <div className="avatar-section">
-          <div className="avatar">
-            {formData.avatar ? (
-              <img src={formData.avatar} alt="Avatar" />
-            ) : (
-              getInitials(formData.name || 'U')
-            )}
+          <div className="avatar" onClick={() => fileRef.current?.click()} style={{ cursor: 'pointer' }}>
+            {userProfile?.avatar ? <img src={userProfile.avatar} alt="Avatar" /> : initials}
+            <div className="avatar-overlay">{uploading ? '...' : 'Edit'}</div>
           </div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-            Add image URL below
-          </p>
+          <input ref={fileRef} type="file" accept="image/*" onChange={uploadAvatar} style={{ display: 'none' }} />
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Click to upload (max 500KB)</p>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="name">Full Name</label>
-            <input
-              type="text"
-              id="name"
-              name="name"
-              value={formData.name}
-              onChange={handleChange}
-              placeholder="Enter your name"
-            />
+        {editing ? (
+          <form onSubmit={save}>
+            <div className="form-group">
+              <label>Full Name</label>
+              <input type="text" value={name} onChange={e => setName(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} disabled={!isGuest} />
+            </div>
+            <div className="button-group">
+              <button type="submit" className="btn btn-primary">{saved ? 'Saved!' : 'Save'}</button>
+              <button type="button" className="btn btn-secondary" onClick={() => setEditing(false)}>Cancel</button>
+            </div>
+          </form>
+        ) : (
+          <div className="profile-display">
+            <p><strong>Name:</strong> {userProfile?.name}</p>
+            <p><strong>Email:</strong> {userProfile?.email}</p>
+            <p><strong>Member since:</strong> {userProfile?.createdAt ? new Date(userProfile.createdAt).toLocaleDateString() : 'N/A'}</p>
+            <button className="btn btn-primary" onClick={() => { setName(userProfile?.name || ''); setEmail(userProfile?.email || ''); setEditing(true) }}>
+              Edit Profile
+            </button>
           </div>
-
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              type="email"
-              id="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              placeholder="Enter your email"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="avatar">Avatar URL</label>
-            <input
-              type="url"
-              id="avatar"
-              name="avatar"
-              value={formData.avatar}
-              onChange={handleChange}
-              placeholder="https://example.com/avatar.jpg"
-            />
-          </div>
-
-          <button type="submit" className="btn btn-primary">
-            {saved ? 'Saved!' : 'Save Profile'}
-          </button>
-        </form>
+        )}
       </div>
+      <NotificationSettings />
     </div>
   )
 }
-
-export default Profile

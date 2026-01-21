@@ -1,23 +1,15 @@
-function ThemeSelector({ currentTheme, onThemeChange }) {
-  const themes = [
-    { id: 'light', label: 'Light' },
-    { id: 'dark', label: 'Dark' },
-    { id: 'high-contrast', label: 'High Contrast' }
-  ]
-
+export default function ThemeSelector({ currentTheme, onThemeChange }) {
   return (
     <div className="theme-selector">
-      {themes.map(theme => (
+      {['light', 'dark', 'high-contrast'].map(t => (
         <button
-          key={theme.id}
-          className={`theme-btn ${currentTheme === theme.id ? 'active' : ''}`}
-          onClick={() => onThemeChange(theme.id)}
+          key={t}
+          className={`theme-btn ${currentTheme === t ? 'active' : ''}`}
+          onClick={() => onThemeChange(t)}
         >
-          {theme.label}
+          {t === 'high-contrast' ? 'High Contrast' : t.charAt(0).toUpperCase() + t.slice(1)}
         </button>
       ))}
     </div>
   )
 }
-
-export default ThemeSelector

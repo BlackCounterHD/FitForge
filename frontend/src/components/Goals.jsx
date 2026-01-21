@@ -1,195 +1,119 @@
 import { useState, useEffect } from 'react'
-
-const API_URL = 'http://localhost:3001/api'
+import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore'
+import { db } from '../firebase'
+import { useAuth } from '../contexts/AuthContext'
 
 const CATEGORIES = ['Strength', 'Cardio', 'Flexibility', 'Weight Loss', 'Endurance', 'Other']
+const defaultForm = { title: '', description: '', target_value: '', category: 'Strength' }
 
-function Goals({ userId }) {
+export default function Goals() {
+  const { currentUser, isGuest } = useAuth()
   const [goals, setGoals] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    target_value: '',
-    category: 'Strength'
-  })
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState(defaultForm)
 
   useEffect(() => {
-    if (userId) {
-      fetchGoals()
-    }
-  }, [userId])
-
-  const fetchGoals = async () => {
-    try {
-      const res = await fetch(`${API_URL}/goals/${userId}`)
-      const data = await res.json()
-      setGoals(data)
-    } catch (err) {
-      console.error('Failed to fetch goals:', err)
-    } finally {
+    if (isGuest) {
+      setGoals([
+        { id: '1', title: 'Run 5km in 25 minutes', description: 'Improve pace', target_value: '25 min', category: 'Cardio', is_completed: false },
+        { id: '2', title: '50 Push-ups', description: 'Upper body strength', target_value: '50 reps', category: 'Strength', is_completed: true }
+      ])
       setLoading(false)
+      return
     }
-  }
+    if (!currentUser) { setLoading(false); return }
 
-  const handleChange = (e) => {
-    const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
-  }
+    return onSnapshot(query(collection(db, 'goals'), where('userId', '==', currentUser.uid)), snap => {
+      setGoals(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)))
+      setLoading(false)
+    })
+  }, [currentUser, isGuest])
 
-  const handleSubmit = async (e) => {
+  const reset = () => { setForm(defaultForm); setShowForm(false); setEditing(null) }
+
+  const submit = async (e) => {
     e.preventDefault()
-    if (!formData.title.trim()) return
-
-    try {
-      const res = await fetch(`${API_URL}/goals`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, user_id: userId })
-      })
-      const newGoal = await res.json()
-      setGoals(prev => [newGoal, ...prev])
-      setFormData({ title: '', description: '', target_value: '', category: 'Strength' })
-      setShowForm(false)
-    } catch (err) {
-      console.error('Failed to create goal:', err)
+    if (!form.title.trim()) return
+    if (isGuest) {
+      editing ? setGoals(g => g.map(x => x.id === editing.id ? { ...x, ...form } : x))
+        : setGoals(g => [{ id: Date.now().toString(), ...form, is_completed: false }, ...g])
+      reset(); return
     }
-  }
-
-  const toggleComplete = async (goal) => {
     try {
-      const res = await fetch(`${API_URL}/goals/${goal.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...goal, is_completed: !goal.is_completed })
-      })
-      const updated = await res.json()
-      setGoals(prev => prev.map(g => g.id === goal.id ? updated : g))
-    } catch (err) {
-      console.error('Failed to update goal:', err)
-    }
+      editing ? await updateDoc(doc(db, 'goals', editing.id), form)
+        : await addDoc(collection(db, 'goals'), { ...form, userId: currentUser.uid, is_completed: false, created_at: new Date().toISOString() })
+      reset()
+    } catch (e) { console.error(e) }
   }
 
-  const deleteGoal = async (id) => {
-    if (!confirm('Are you sure you want to delete this goal?')) return
-
-    try {
-      await fetch(`${API_URL}/goals/${id}`, { method: 'DELETE' })
-      setGoals(prev => prev.filter(g => g.id !== id))
-    } catch (err) {
-      console.error('Failed to delete goal:', err)
-    }
+  const toggle = async (g) => {
+    if (isGuest) { setGoals(gs => gs.map(x => x.id === g.id ? { ...x, is_completed: !x.is_completed } : x)); return }
+    try { await updateDoc(doc(db, 'goals', g.id), { is_completed: !g.is_completed }) } catch (e) { console.error(e) }
   }
 
-  if (loading) {
-    return <div className="card"><p>Loading goals...</p></div>
+  const remove = async (id) => {
+    if (!confirm('Delete this goal?')) return
+    if (isGuest) { setGoals(g => g.filter(x => x.id !== id)); return }
+    try { await deleteDoc(doc(db, 'goals', id)) } catch (e) { console.error(e) }
   }
+
+  const edit = (g) => { setForm({ title: g.title, description: g.description || '', target_value: g.target_value || '', category: g.category || 'Strength' }); setEditing(g); setShowForm(true) }
+
+  if (loading) return <div className="card"><p>Loading goals...</p></div>
 
   return (
     <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div className="card-header">
         <h2>Fitness Goals</h2>
-        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ Add Goal'}
-        </button>
+        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>{showForm ? 'Cancel' : '+ Add Goal'}</button>
       </div>
 
       {showForm && (
-        <form className="add-goal-form" onSubmit={handleSubmit}>
-          <h3>New Goal</h3>
+        <form className="add-goal-form" onSubmit={submit}>
+          <h3>{editing ? 'Edit Goal' : 'New Goal'}</h3>
           <div className="form-group">
-            <label htmlFor="title">Goal Title *</label>
-            <input
-              type="text"
-              id="title"
-              name="title"
-              value={formData.title}
-              onChange={handleChange}
-              placeholder="e.g., Run 5km in 25 minutes"
-              required
-            />
+            <label>Goal Title *</label>
+            <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required />
           </div>
-
           <div className="form-row">
             <div className="form-group">
-              <label htmlFor="category">Category</label>
-              <select
-                id="category"
-                name="category"
-                value={formData.category}
-                onChange={handleChange}
-              >
-                {CATEGORIES.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
+              <label>Category</label>
+              <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
-
             <div className="form-group">
-              <label htmlFor="target_value">Target</label>
-              <input
-                type="text"
-                id="target_value"
-                name="target_value"
-                value={formData.target_value}
-                onChange={handleChange}
-                placeholder="e.g., 25 minutes, 100 reps"
-              />
+              <label>Target</label>
+              <input type="text" value={form.target_value} onChange={e => setForm({ ...form, target_value: e.target.value })} />
             </div>
           </div>
-
           <div className="form-group">
-            <label htmlFor="description">Description</label>
-            <textarea
-              id="description"
-              name="description"
-              value={formData.description}
-              onChange={handleChange}
-              placeholder="Add more details about your goal..."
-              rows={3}
-            />
+            <label>Description</label>
+            <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2} />
           </div>
-
-          <button type="submit" className="btn btn-primary">Create Goal</button>
+          <button type="submit" className="btn btn-primary">{editing ? 'Update' : 'Create'}</button>
         </form>
       )}
 
       <div className="goals-list">
-        {goals.length === 0 ? (
-          <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '40px' }}>
-            No goals yet. Click "+ Add Goal" to create your first fitness goal!
-          </p>
-        ) : (
-          goals.map(goal => (
-            <div key={goal.id} className={`goal-item ${goal.is_completed ? 'completed' : ''}`}>
-              <div className="goal-info">
-                <div className="goal-title">{goal.title}</div>
-                {goal.description && (
-                  <div className="goal-description">{goal.description}</div>
-                )}
-                {goal.target_value && (
-                  <div className="goal-description">Target: {goal.target_value}</div>
-                )}
-                <span className="goal-category">{goal.category}</span>
-              </div>
-              <div className="goal-actions">
-                <button
-                  className={`btn ${goal.is_completed ? 'btn-secondary' : 'btn-success'}`}
-                  onClick={() => toggleComplete(goal)}
-                >
-                  {goal.is_completed ? 'Undo' : 'Complete'}
-                </button>
-                <button className="btn btn-danger" onClick={() => deleteGoal(goal.id)}>
-                  Delete
-                </button>
-              </div>
+        {goals.length === 0 ? <p className="empty-state">No goals yet. Click "+ Add Goal" to start!</p> : goals.map(g => (
+          <div key={g.id} className={`goal-item ${g.is_completed ? 'completed' : ''}`}>
+            <div className="goal-info">
+              <div className="goal-title">{g.title}</div>
+              {g.description && <div className="goal-description">{g.description}</div>}
+              {g.target_value && <div className="goal-description">Target: {g.target_value}</div>}
+              <span className="goal-category">{g.category}</span>
             </div>
-          ))
-        )}
+            <div className="goal-actions">
+              <button className="btn btn-secondary" onClick={() => edit(g)}>Edit</button>
+              <button className={`btn ${g.is_completed ? 'btn-secondary' : 'btn-success'}`} onClick={() => toggle(g)}>{g.is_completed ? 'Undo' : 'Done'}</button>
+              <button className="btn btn-danger" onClick={() => remove(g.id)}>Delete</button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
 }
-
-export default Goals
