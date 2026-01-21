@@ -4,6 +4,12 @@ node_modules/
 # Data
 backend/data.json
 
+# Environment variables
+.env
+.env.local
+frontend/.env
+backend/.env
+
 # Docs (personal notes)
 docs/
 PRESENTATION.md
